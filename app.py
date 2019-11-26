@@ -15,7 +15,7 @@ server = app.server
 
 app.title = 'Vancouver Crime Stats'
 
-df = pd.read_csv('../data/crimedata_csv_all_years.csv')
+df = pd.read_csv('data/crimedata_csv_all_years.csv')
 df = df.query('NEIGHBOURHOOD == NEIGHBOURHOOD & NEIGHBOURHOOD != "Musqueam" & NEIGHBOURHOOD != "Stanley Park"')
 
 list_of_locations = df['NEIGHBOURHOOD'].dropna().unique()
@@ -54,7 +54,7 @@ def plot_by_neighbor(neighbourhood="ALL", crime = "Theft of Bicycle", time_scale
     )
     return chart
 
-geojson_filepath = '../data/our_geojson.geojson'
+geojson_filepath = 'data/our_geojson.geojson'
 
 def open_geojson(path):
     """
