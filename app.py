@@ -97,6 +97,8 @@ def plot_choropleth(year_init = 2010, year_end = 2018, crime_type = 'all'):
             stroke='white',
             strokeWidth=1
         ).encode(
+            tooltip = [alt.Tooltip('properties.NEIGHBOURHOOD:N', title =  'Neighbourhood'), 
+                        alt.Tooltip('properties.COUNT:Q', title = 'Count')]
         ).properties(
             width=1000,
             height=600
