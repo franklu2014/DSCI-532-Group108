@@ -8,6 +8,7 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 from dash.dependencies import Input, Output
+import numpy as np
 
 app = dash.Dash(__name__, assets_folder='assets')
 app.config['suppress_callback_exceptions'] = True
@@ -15,28 +16,31 @@ server = app.server
 
 app.title = 'Vancouver Crime Stats'
 
-df = pd.read_csv('data/crimedata_csv_all_years.csv')
+df = pd.read_csv('../data/crimedata_csv_all_years.csv')
 df = df.query('NEIGHBOURHOOD == NEIGHBOURHOOD & NEIGHBOURHOOD != "Musqueam" & NEIGHBOURHOOD != "Stanley Park"')
 
 list_of_locations = df['NEIGHBOURHOOD'].dropna().unique()
-dict_of_locations = dict(zip(list_of_locations, list_of_locations))
+list_of_locations = np.insert(list_of_locations, 0, 'ALL')
+list_of_crimes = df['TYPE'].unique()
+list_of_crimes = np.insert(list_of_crimes, 0, 'ALL')
+list_of_years = ['YEAR', 'MONTH', 'DAY', 'HOUR']
 
-list_of_crimes = df['TYPE'].dropna().unique()
-dict_of_crimes = dict(zip(list_of_crimes, list_of_crimes))
-
-list_of_years = ['YEAR', 'MONTH']
-
-def plot_by_neighbor(neighbourhood="ALL", crime = "Theft of Bicycle", time_scale = "YEAR"):
+def plot_by_neighbor(year_init = 2010, year_end = 2018, neighbourhood="ALL", crime = "ALL", time_scale = "YEAR"):
+    
+    df_line = df.query('@year_init <= YEAR & YEAR <= @year_end')
+    
     if neighbourhood != "ALL":
         if crime != "ALL":
-            df_line = df.query('TYPE == @crime & NEIGHBOURHOOD == @neighbourhood').groupby([time_scale]).count().reset_index()
+            df_line = df_line.query('TYPE == @crime & NEIGHBOURHOOD == @neighbourhood').groupby([time_scale]).count().reset_index()
         else:    
-            df_line = df.query('NEIGHBOURHOOD == @neighbourhood').groupby([time_scale]).count().reset_index()
+            df_line = df._line.query('NEIGHBOURHOOD == @neighbourhood').groupby([time_scale]).count().reset_index()
     else:
+        neighbourhood = 'All Neighbourhoods'
         if crime != "ALL":
-            df_line = df.query('TYPE == @crime').groupby([time_scale]).count().reset_index()
+            df_line = df_line.query('TYPE == @crime').groupby([time_scale]).count().reset_index()
         else:
-            df_line = df.groupby([time_scale]).count().reset_index() 
+            crime = 'All Crimes'
+            df_line = df_line.groupby([time_scale]).count().reset_index() 
     
     chart = alt.Chart(df_line).mark_line().encode(
         alt.X(time_scale+':N'),
@@ -50,55 +54,51 @@ def plot_by_neighbor(neighbourhood="ALL", crime = "Theft of Bicycle", time_scale
     ).properties(
     height=300,
     width=500,
-    title=crime
+    title= neighbourhood + ': ' + crime
     )
     return chart
 
-geojson_filepath = 'data/our_geojson.geojson'
-
-def open_geojson(path):
-    """
-    Opens a geojson file at "path" filepath
-    """
-    with open(path) as json_data:
-        d = json.load(json_data)
-    return d
 
 def get_geopandas_df(path):
     """
-    Creates geopandas dataframe from geeojson file 
-    at "path" filepath
+    Create a geopandas dataframe from the geeojson at the specified filepath
     """
-    open_json = open_geojson(path)
-    gdf = gpd.GeoDataFrame.from_features((open_json))
+    with open(path) as json_data:
+        open_json = json.load(json_data)
+    gdf = gpd.GeoDataFrame.from_features(open_json)
     return gdf
 
+geojson_filepath = '../data/our_geojson.geojson'
 gdf = get_geopandas_df(geojson_filepath)
 gdf = gdf.rename(columns = {'Name': 'NEIGHBOURHOOD'}).drop(columns = 'description')
 
-def plot_choropleth(year_init = 2010, year_end = 2018, crime_type = 'all'):
+def plot_choropleth(year_init = 2010, year_end = 2018, crime_type = 'all', crime_threshold = 1):
 
     crime_cnt = (df.query('@year_init <= YEAR & YEAR <= @year_end').groupby(['NEIGHBOURHOOD', 'TYPE'])[['MINUTE']]
-                .count().rename(columns = {'MINUTE': 'COUNT'})
-                .reset_index())
+                 .count().rename(columns = {'MINUTE': 'COUNT'})
+                 .reset_index())
 
     if(crime_type.lower() == 'all'):
+        crime_type = 'All Crimes'
         crime_cnt = crime_cnt.groupby('NEIGHBOURHOOD')[['COUNT']].sum().reset_index()
     else:
         crime_cnt = crime_cnt.query('TYPE == @crime_type').groupby('NEIGHBOURHOOD')[['COUNT']].sum().reset_index()
 
+    crime_cnt['MINMAX'] = (crime_cnt['COUNT'] - crime_cnt['COUNT'].min()) / (crime_cnt['COUNT'].max() - crime_cnt['COUNT'].min())
+    crime_cnt['MINMAX'] = round(crime_cnt['MINMAX'], 3)
     crime_geo_cnt = gdf.merge(crime_cnt, on = 'NEIGHBOURHOOD')
 
     alt_json = json.loads(crime_geo_cnt.to_json())
     alt_base = alt.Data(values = alt_json['features'])
 
     base_map = alt.Chart(alt_base, 
-                        title = f"Vancouver Crime Count (type = {crime_type})").mark_geoshape(
+                        title = f"Crime type = {crime_type}").mark_geoshape(
             stroke='white',
             strokeWidth=1
         ).encode(
             tooltip = [alt.Tooltip('properties.NEIGHBOURHOOD:N', title =  'Neighbourhood'), 
-                        alt.Tooltip('properties.COUNT:Q', title = 'Count')]
+                       alt.Tooltip('properties.COUNT:Q', title = 'Count'), 
+                       alt.Tooltip('properties.MINMAX:Q', title =  'Ratio')]
         ).properties(
             width=1000,
             height=600
@@ -108,7 +108,12 @@ def plot_choropleth(year_init = 2010, year_end = 2018, crime_type = 'all'):
         fill = 'lightgray', 
         stroke = 'white'
     ).encode(
-        color = alt.Color('properties.COUNT:Q', legend = alt.Legend(title = 'crime count'))
+        alt.Color('properties.MINMAX:Q', 
+                  legend = alt.Legend(title = 'crime index'), 
+                  scale=alt.Scale(domain = (0.0, crime_threshold),
+                                  range = ('#CAFFA8', '#DF3F12', '#000000')
+                                 )
+                 )
     )
 
     return (choro + base_map).properties(width = 700, height = 400)
@@ -132,7 +137,8 @@ app.layout = html.Div([
             {'label': i, 'value': i}
             for i in list_of_crimes
         ],
-        value = 'Theft of Bicycle',
+        value = 'ALL',
+        placeholder = 'ALL',
         style=dict(width='90%',
             verticalAlign="middle"
             )
@@ -159,6 +165,7 @@ app.layout = html.Div([
             for i in list_of_locations
         ],
         value = 'ALL',
+        placeholder = 'ALL',
         style=dict(width='90%',
             verticalAlign="middle"
             )
@@ -182,6 +189,19 @@ app.layout = html.Div([
     
     html.Div([
         # Graphs
+        html.Div([
+            dcc.Slider(
+                id='slider-updatemode',
+        marks={'0.1': '0.1', '1': '1'},
+        max=1,
+        min=0.1,
+        value=1,
+        step=0.01,
+        updatemode='drag',
+        vertical=True
+            ),
+        ], style={'height': '100px', 'margin-left':'900px'}),
+        html.Br(),
         
         html.Iframe(
             # Crime Map
@@ -191,7 +211,6 @@ app.layout = html.Div([
             width='100%',
             style={'border-width': '0'},
             
-            ### INSERT MAP CODE HERE FRANK, Don't forget ID for IFrame
                 srcDoc=plot_choropleth().to_html()
             ),
         
@@ -211,19 +230,24 @@ app.layout = html.Div([
 
 @app.callback(
     dash.dependencies.Output('plot', 'srcDoc'),
-    [dash.dependencies.Input('dd-chart', 'value'), dash.dependencies.Input('crime-chart', 'value'), dash.dependencies.Input('year-chart', 'value')])
-def update_plot(location, types, year):
+    [dash.dependencies.Input('year-slider', 'value'), dash.dependencies.Input('dd-chart', 'value'), dash.dependencies.Input('crime-chart', 'value'), dash.dependencies.Input('year-chart', 'value')])
+def update_plot(year_range, location, types, year):
 
-    updated_plot = plot_by_neighbor(neighbourhood=location, crime=types, time_scale=year).to_html()
+    updated_plot = plot_by_neighbor(year_init=year_range[0], year_end=year_range[1], neighbourhood=location, crime=types, time_scale=year).to_html()
 
     return updated_plot
 
 @app.callback(
     dash.dependencies.Output('choropleth', 'srcDoc'),
-    [dash.dependencies.Input('year-slider', 'value'), dash.dependencies.Input('crime-chart', 'value')])
-def update_choropleth(year_range, type):
+    [dash.dependencies.Input('year-slider', 'value'), 
+     dash.dependencies.Input('crime-chart', 'value'), 
+     dash.dependencies.Input('slider-updatemode', 'value')])
+def update_choropleth(year_range, crime_type, crime_threshold):
 
-    updated_plot = plot_choropleth(year_init=year_range[0], year_end=year_range[1], crime_type=type).to_html()
+    updated_plot = plot_choropleth(year_init=year_range[0], 
+                                   year_end=year_range[1], 
+                                   crime_type=crime_type, 
+                                   crime_threshold=crime_threshold).to_html()
 
     return updated_plot
 
