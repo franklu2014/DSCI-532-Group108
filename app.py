@@ -16,7 +16,7 @@ server = app.server
 
 app.title = 'Vancouver Crime Stats'
 
-df = pd.read_csv('../data/crimedata_csv_all_years.csv')
+df = pd.read_csv('data/crimedata_csv_all_years.csv')
 df = df.query('NEIGHBOURHOOD == NEIGHBOURHOOD & NEIGHBOURHOOD != "Musqueam" & NEIGHBOURHOOD != "Stanley Park"')
 
 list_of_locations = df['NEIGHBOURHOOD'].dropna().unique()
@@ -68,7 +68,7 @@ def get_geopandas_df(path):
     gdf = gpd.GeoDataFrame.from_features(open_json)
     return gdf
 
-geojson_filepath = '../data/our_geojson.geojson'
+geojson_filepath = 'data/our_geojson.geojson'
 gdf = get_geopandas_df(geojson_filepath)
 gdf = gdf.rename(columns = {'Name': 'NEIGHBOURHOOD'}).drop(columns = 'description')
 
